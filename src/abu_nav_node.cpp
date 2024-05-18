@@ -109,6 +109,7 @@ class abu_nav : public rclcpp::Node{
 	
 	// Internal Finite State Machine
 	int abu_fsm = 0;
+	int abu_prev_fsm = -1;
 	enum ABU_FSM{
 		ABU_FSM_IDLE = 0,// Idle state
 		ABU_FSM_SEL_TEAM,// Team select decision 
@@ -147,7 +148,7 @@ class abu_nav : public rclcpp::Node{
 	uint16_t Left_distance;
 	uint16_t Right_distance;
 	
-	uint8_t first_range = 1;
+	uint8_t first_range[3] = {1};
 	VL53L1X_Result_t Results;
 	
 	abu_nav() : Node("ABUNavigator"){
@@ -198,12 +199,12 @@ class abu_nav : public rclcpp::Node{
 		// 0 - TOF_FRONT -> Front sensor
 		// 1 - TOF_LEFT -> Left sensor
 		// 2 - TOF_RIGHT -> Right senser
-		for(uint8_t i=0; i < 3; i++){
+		for(uint8_t i=2; i != 255; i--){
 			switch(i){
 			case TOF_FRONT:
 				ToF_select(TOF_FRONT);
-				VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
-				usleep(20000);// 20ms delay
+				//VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
+				usleep(200000);// 20ms delay
 				if(VL53L1X_SensorInit(TOF_FRONT) < 0){
 					RCLCPP_ERROR(this->get_logger(), "TOF_FRONT Init Error");
 					exit(1);
@@ -217,35 +218,38 @@ class abu_nav : public rclcpp::Node{
 			
 			case TOF_LEFT:
 				ToF_select(TOF_LEFT);
-				VL53L1X_UltraLite_Linux_I2C_Init(TOF_LEFT, bus_id, 0x29);
-				if(VL53L1X_SetI2CAddress(TOF_FRONT, 0x2A) < 0){
+				//VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
+				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2A << 1)) < 0){
 					RCLCPP_ERROR(this->get_logger(), "Set TOF_LEFT I2C address Error");
 					exit(1);
 				}
-				VL53L1X_UltraLite_Linux_I2C_change_device(TOF_LEFT, 0x2A);
-				usleep(20000);// 20ms delay
+				VL53L1X_UltraLite_Linux_I2C_Init(TOF_LEFT, bus_id, 0x2A);
+				usleep(200000);// 20ms delay
 				VL53L1X_SensorInit(TOF_LEFT);
 				VL53L1X_SetDistanceMode(TOF_LEFT, 2); /* 1=short, 2=long */
 				VL53L1X_SetTimingBudgetInMs(TOF_LEFT, 50);
 				VL53L1X_SetInterMeasurementInMs(TOF_LEFT, 52);
 				VL53L1X_StartRanging(TOF_LEFT);
+				//VL53L1X_UltraLite_Linux_I2C_change_device(TOF_LEFT, (0x2A << 1));
 				RCLCPP_INFO(this->get_logger(), "Left ToF configured");
 			break;
 			
 			case TOF_RIGHT:
 				ToF_select(TOF_RIGHT);
-				VL53L1X_UltraLite_Linux_I2C_Init(TOF_RIGHT, bus_id, 0x29);
-				if(VL53L1X_SetI2CAddress(TOF_FRONT, 0x2B) < 0){
+				VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
+				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2B << 1)) < 0){
 					RCLCPP_ERROR(this->get_logger(), "Set TOF_RIGHT I2C address Error");
 					exit(1);
 				}
-				VL53L1X_UltraLite_Linux_I2C_change_device(TOF_RIGHT, 0x2B);
-				usleep(20000);// 20ms delay
+				VL53L1X_UltraLite_Linux_I2C_Init(TOF_RIGHT, bus_id, 0x2B);
+				usleep(200000);// 20ms delay
 				VL53L1X_SensorInit(TOF_RIGHT);
 				VL53L1X_SetDistanceMode(TOF_RIGHT, 2); /* 1=short, 2=long */
 				VL53L1X_SetTimingBudgetInMs(TOF_RIGHT, 50);
 				VL53L1X_SetInterMeasurementInMs(TOF_RIGHT, 52);
 				VL53L1X_StartRanging(TOF_RIGHT);
+
+				//VL53L1X_UltraLite_Linux_I2C_change_device(TOF_RIGHT, (0x2B << 1));
 				RCLCPP_INFO(this->get_logger(), "Right ToF configured");
 			break;
 			}
@@ -282,8 +286,57 @@ class abu_nav : public rclcpp::Node{
 	void abu_runner(){
 		
 		// For emergency
-		if(got_teammode_flag == 1)
-			abu_fsm = ABU_FSM_STOP;
+		if(got_teammode_flag == 1){
+			abu_fsm = ABU_FSM_IDLE;
+			twist.linear.x = 0.0;
+			twist.linear.y = 0.0;
+			twistout->publish(twist);
+		}
+		if(abu_prev_fsm != abu_fsm){
+			abu_prev_fsm = abu_fsm;
+			switch(abu_prev_fsm){
+			case ABU_FSM_IDLE:
+				RCLCPP_INFO(this->get_logger(), "Idle state");
+			break;
+
+			case ABU_FSM_SEL_TEAM:
+				RCLCPP_INFO(this->get_logger(), "Selecting team");
+			break;
+			
+			case ABU_FSM_SEL_PLAYMODE:
+				RCLCPP_INFO(this->get_logger(), "Select Play mode");
+			break;
+
+			case ABU_FSM_A1_A2:
+				RCLCPP_INFO(this->get_logger(), "Blind walk from Area 1 to Area 2");
+			break;
+
+			case ABU_FSM_A2_A2:
+				RCLCPP_INFO(this->get_logger(), "Brake before Area 2 corner");
+			break;
+
+			case ABU_FSM_A2_RED:
+				RCLCPP_INFO(this->get_logger(), "leaving Area 2 Team red");
+			break;
+
+			case ABU_FSM_A2_BLU:
+				RCLCPP_INFO(this->get_logger(), "leaving Area 2 Team blue");
+			break;
+
+			case ABU_FSM_A2_A3_SLOPE:
+				RCLCPP_INFO(this->get_logger(), "From Area 2 to Area 3 slope");
+			break;
+
+			case ABU_FSM_A3_A3:
+				RCLCPP_INFO(this->get_logger(), "Area 3");
+			break;
+
+			case ABU_FSM_STOP:
+				RCLCPP_INFO(this->get_logger(), "STOP MODE");
+			break;
+			}
+			
+		}
 		
 		switch(abu_fsm){
 		case ABU_FSM_IDLE:// Idle state, Wait for new message
@@ -300,6 +353,8 @@ class abu_nav : public rclcpp::Node{
 		{
 			size_t pos = teammode_str.find(",");
 			std::string parse_team = teammode_str.substr(0, pos);
+
+			RCLCPP_INFO(this->get_logger(),"Received %s", parse_team.c_str());
 			
 			if((parse_team == "Red") || (parse_team == "red") || (parse_team == "RED")){
 				team = TEAM_RED;
@@ -385,8 +440,8 @@ class abu_nav : public rclcpp::Node{
 		{
 			float calc_vel;
 			
-			Front_distance = ToF_getDistance(TOF_FRONT);
-			
+			Front_distance = ToF_getDistance(TOF_LEFT);
+			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 			// Detect front sensor
 			if(Front_distance > 3000)// If measurement is more than 3000mm (3m)
 				Front_distance = 3000;// Cap it at 3 meters
@@ -419,7 +474,7 @@ class abu_nav : public rclcpp::Node{
 			float calc_vel;
 			
 			Left_distance = ToF_getDistance(TOF_LEFT);
-			
+			RCLCPP_INFO(this->get_logger(), "Left Distance :%d", Left_distance);
 			// Detect Left sensor
 			if(Left_distance > 4285)// If measurement is more than 3000mm (3m)
 				Left_distance = 4285;// Cap it at 3 meters
@@ -442,7 +497,7 @@ class abu_nav : public rclcpp::Node{
 			float calc_vel;
 			
 			Right_distance = ToF_getDistance(TOF_RIGHT);
-			
+			RCLCPP_INFO(this->get_logger(), "Right Distance :%d", Right_distance);
 			// Detect Right sensor
 			if(Right_distance > 4285)// If measurement is more than 3000mm (3m)
 				Right_distance = 4285;// Cap it at 3 meters
@@ -542,19 +597,19 @@ class abu_nav : public rclcpp::Node{
 		switch(ToF){
 		case TOF_FRONT:
 			tof_sel.values[0] = 1;
-			tof_sel.values[1] = 0;
-			tof_sel.values[2] = 0;
+			tof_sel.values[1] = 1;
+			tof_sel.values[2] = 1;
 		break;
 		
 		case TOF_LEFT:
-			tof_sel.values[0] = 1;
+			tof_sel.values[0] = 0;
 			tof_sel.values[1] = 1;
-			tof_sel.values[2] = 0;
+			tof_sel.values[2] = 1;
 		break;
 		
 		case TOF_RIGHT:
-			tof_sel.values[0] = 1;
-			tof_sel.values[1] = 1;
+			tof_sel.values[0] = 0;
+			tof_sel.values[1] = 0;
 			tof_sel.values[2] = 1;
 		break;
 		
@@ -579,13 +634,16 @@ class abu_nav : public rclcpp::Node{
 	uint16_t ToF_getDistance(uint8_t ToF){
 		VL53L1X_GetResult(ToF, &Results);
 		VL53L1X_ClearInterrupt(ToF);
-		if (first_range) {
+		if (first_range[ToF]) {
 			/* very first measurement shall be ignored
 			 * thus requires twice call
 			 */
 			VL53L1X_ClearInterrupt(ToF);
-			first_range = 0;
+			first_range[ToF] = 0;
+			return 3000;
 		}
+		if(Results.Distance > 4000)
+			return 4000;
 		return Results.Distance;
 	}
 	
