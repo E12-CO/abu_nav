@@ -194,7 +194,7 @@ class abu_nav : public rclcpp::Node{
 			RCLCPP_ERROR(this->get_logger(), "Initializing GPIOs error! Quiting...");
 			exit(1);
 		}
-		
+//		ToF_select(255);
 		// Initialize the VL53l1X sensors
 		// 0 - TOF_FRONT -> Front sensor
 		// 1 - TOF_LEFT -> Left sensor
@@ -203,8 +203,7 @@ class abu_nav : public rclcpp::Node{
 			switch(i){
 			case TOF_FRONT:
 				ToF_select(TOF_FRONT);
-				//VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
-				usleep(200000);// 20ms delay
+				usleep(20000);// 20ms delay for sensor startup
 				if(VL53L1X_SensorInit(TOF_FRONT) < 0){
 					RCLCPP_ERROR(this->get_logger(), "TOF_FRONT Init Error");
 					exit(1);
@@ -218,38 +217,34 @@ class abu_nav : public rclcpp::Node{
 			
 			case TOF_LEFT:
 				ToF_select(TOF_LEFT);
-				//VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
+				usleep(20000);// 20ms delay for sensor startup
 				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2A << 1)) < 0){
 					RCLCPP_ERROR(this->get_logger(), "Set TOF_LEFT I2C address Error");
 					exit(1);
 				}
 				VL53L1X_UltraLite_Linux_I2C_Init(TOF_LEFT, bus_id, 0x2A);
-				usleep(200000);// 20ms delay
 				VL53L1X_SensorInit(TOF_LEFT);
 				VL53L1X_SetDistanceMode(TOF_LEFT, 2); /* 1=short, 2=long */
 				VL53L1X_SetTimingBudgetInMs(TOF_LEFT, 50);
 				VL53L1X_SetInterMeasurementInMs(TOF_LEFT, 52);
 				VL53L1X_StartRanging(TOF_LEFT);
-				//VL53L1X_UltraLite_Linux_I2C_change_device(TOF_LEFT, (0x2A << 1));
 				RCLCPP_INFO(this->get_logger(), "Left ToF configured");
 			break;
 			
 			case TOF_RIGHT:
 				ToF_select(TOF_RIGHT);
+				usleep(20000);// 20ms delay for sensor startup
 				VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
 				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2B << 1)) < 0){
 					RCLCPP_ERROR(this->get_logger(), "Set TOF_RIGHT I2C address Error");
 					exit(1);
 				}
 				VL53L1X_UltraLite_Linux_I2C_Init(TOF_RIGHT, bus_id, 0x2B);
-				usleep(200000);// 20ms delay
 				VL53L1X_SensorInit(TOF_RIGHT);
 				VL53L1X_SetDistanceMode(TOF_RIGHT, 2); /* 1=short, 2=long */
 				VL53L1X_SetTimingBudgetInMs(TOF_RIGHT, 50);
 				VL53L1X_SetInterMeasurementInMs(TOF_RIGHT, 52);
 				VL53L1X_StartRanging(TOF_RIGHT);
-
-				//VL53L1X_UltraLite_Linux_I2C_change_device(TOF_RIGHT, (0x2B << 1));
 				RCLCPP_INFO(this->get_logger(), "Right ToF configured");
 			break;
 			}
@@ -292,6 +287,7 @@ class abu_nav : public rclcpp::Node{
 			twist.linear.y = 0.0;
 			twistout->publish(twist);
 		}
+
 		if(abu_prev_fsm != abu_fsm){
 			abu_prev_fsm = abu_fsm;
 			switch(abu_prev_fsm){
@@ -464,6 +460,8 @@ class abu_nav : public rclcpp::Node{
 				twist.linear.y = 0.0;
 			}else{
 				twist.linear.x = calc_vel;
+				// A little bit of y component to make sure that the robot sticks to the wall
+				twist.linear.y = (team == TEAM_RED) ? 0.1 : ((team == TEAM_BLUE) ? -0.1 : 0.0);
 			}
 			twistout->publish(twist);
 		}
@@ -612,13 +610,21 @@ class abu_nav : public rclcpp::Node{
 			tof_sel.values[1] = 0;
 			tof_sel.values[2] = 1;
 		break;
-		
+
+		case 255:
+			tof_sel.values[0] = 0;
+			tof_sel.values[1] = 0;
+			tof_sel.values[2] = 1;
+		break;
+
 		default:
+			tof_sel.values[0] = 0;
+			tof_sel.values[1] = 0;
+			tof_sel.values[2] = 0;
 			RCLCPP_ERROR(
 				this->get_logger(),
 				"Error! Selecting the out off range sensor number"
 			);
-			return;
 		}
 		
 		ret = ioctl(rq.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &tof_sel);
