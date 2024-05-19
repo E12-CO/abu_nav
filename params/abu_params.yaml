@@ -1,9 +1,9 @@
 ABUNavigator:
   ros__parameters:
     i2c_bus_number: 1
-    TOF_front_EN: 21
-    TOF_left_EN: 20
-    TOF_right_EN: 16
+    TOF_front_EN:  23
+    TOF_left_EN:   19
+    TOF_right_EN:  26
 
     twist_output_topic: "/cmd_vel"
     
