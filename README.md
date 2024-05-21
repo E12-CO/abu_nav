@@ -19,3 +19,14 @@ ABU R0b0c0n 2O24 navigator node. Using 3 VL53L1X ToF sensors.
 
 # Pub
 - /cmd_vel (geometry_msgs/msg/Twist)
+
+# Example test
+```
+ros2 topic pub --once /teammode std_msgs/msg/String 'data: Red,Start'
+```
+```
+ros2 topic pub --once /teammode std_msgs/msg/String 'data: Blue,RETRY'
+```
+```
+ros2 topic pub --once /teammode std_msgs/msg/String 'data: stop,stop'
+```
