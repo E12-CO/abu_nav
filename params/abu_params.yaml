@@ -2,13 +2,13 @@ ABUNavigator:
   ros__parameters:
     i2c_bus_number: 1
     TOF_front_EN:  13
-    TOF_left_EN:   26
-    TOF_right_EN:  19
+    TOF_left_EN:   19
+    TOF_right_EN:  26
 
     twist_output_topic: "/cmd_vel"
     
-    motion_A1A2_period: 70
-    motion_A1A2_velocity: 0.5
+    motion_A1A2_period: 50
+    motion_A1A2_velocity: 1.0
 
     motion_A2A3_period: 42
     motion_A2A3_velocity: 0.5
