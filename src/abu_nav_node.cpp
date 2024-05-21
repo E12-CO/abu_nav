@@ -194,7 +194,8 @@ class abu_nav : public rclcpp::Node{
 			RCLCPP_ERROR(this->get_logger(), "Initializing GPIOs error! Quiting...");
 			exit(1);
 		}
-//		ToF_select(255);
+		ToF_select(255);
+		usleep(200000);//wait 200ms for sensor to reset
 		// Initialize the VL53l1X sensors
 		// 0 - TOF_FRONT -> Front sensor
 		// 1 - TOF_LEFT -> Left sensor
@@ -424,9 +425,9 @@ class abu_nav : public rclcpp::Node{
 				twist.linear.x = 0.0;
 				//twist.linear.y = 0.0;
 			}else{
-				twist.linear.x = blindwalk_velocity;
+				twist.linear.x = -blindwalk_velocity;
 				// A little bit of y component to make sure that the robot sticks to the wall
-				twist.linear.y = (team == TEAM_RED) ? 0.1 : ((team == TEAM_BLUE) ? -0.1 : 0.0);
+				//twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
 			}
 			twistout->publish(twist);
 		}
@@ -436,7 +437,7 @@ class abu_nav : public rclcpp::Node{
 		{
 			float calc_vel;
 			
-			Front_distance = ToF_getDistance(TOF_LEFT);
+			Front_distance = ToF_getDistance(TOF_FRONT);
 			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 			// Detect front sensor
 			if(Front_distance > 3000)// If measurement is more than 3000mm (3m)
@@ -459,9 +460,9 @@ class abu_nav : public rclcpp::Node{
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
 			}else{
-				twist.linear.x = calc_vel;
+				twist.linear.x = -calc_vel;
 				// A little bit of y component to make sure that the robot sticks to the wall
-				twist.linear.y = (team == TEAM_RED) ? 0.1 : ((team == TEAM_BLUE) ? -0.1 : 0.0);
+				twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
 			}
 			twistout->publish(twist);
 		}
@@ -484,7 +485,7 @@ class abu_nav : public rclcpp::Node{
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
 			}else{
-				twist.linear.y = -calc_vel;// Move from Left to right
+				twist.linear.y = calc_vel;// Move from Left to right
 			}
 			twistout->publish(twist);
 		}
@@ -507,7 +508,7 @@ class abu_nav : public rclcpp::Node{
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
 			}else{
-				twist.linear.y = calc_vel;// Move from Right to Left
+				twist.linear.y = -calc_vel;// Move from Right to Left
 			}
 			twistout->publish(twist);
 			
@@ -525,7 +526,7 @@ class abu_nav : public rclcpp::Node{
 				twist.linear.y = 0.0;
 				abu_fsm = ABU_FSM_A3_A3;
 			}else{
-				twist.linear.x = blindwalk_velocity_2;	
+				twist.linear.x = -blindwalk_velocity_2;	
 			}
 			twistout->publish(twist);
 		}
@@ -611,10 +612,10 @@ class abu_nav : public rclcpp::Node{
 			tof_sel.values[2] = 1;
 		break;
 
-		case 255:
+		case 255:// Case for reset all sensors
 			tof_sel.values[0] = 0;
 			tof_sel.values[1] = 0;
-			tof_sel.values[2] = 1;
+			tof_sel.values[2] = 0;
 		break;
 
 		default:
