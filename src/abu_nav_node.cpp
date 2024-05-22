@@ -647,7 +647,6 @@ class abu_nav : public rclcpp::Node{
 			 */
 			VL53L1X_ClearInterrupt(ToF);
 			first_range[ToF] = 0;
-			return 3000;
 		}
 		if(Results.Distance > 4000)
 			return 4000;
