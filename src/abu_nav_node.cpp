@@ -69,6 +69,10 @@ class abu_nav : public rclcpp::Node{
 	rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twistout;
 	geometry_msgs::msg::Twist twist;
 	
+	// For status flag
+	rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPub;
+	std_msgs::msg::String statusOut;
+	
 	rclcpp::Subscription<std_msgs::msg::String>::SharedPtr TeamMode;
 
 	rclcpp::TimerBase::SharedPtr runner_;
@@ -262,6 +266,10 @@ class abu_nav : public rclcpp::Node{
 		
 		twistout = create_publisher<geometry_msgs::msg::Twist>(
 			twistout_topic, 
+			10);
+			
+		statusPub = create_publisher<std_msgs::msg::String>(
+			"/abu_nav_stat"
 			10);
 			
 		runner_ = this->create_wall_timer(
@@ -535,6 +543,8 @@ class abu_nav : public rclcpp::Node{
 		case ABU_FSM_A3_A3:// Done
 		{
 			abu_fsm = ABU_FSM_STOP;
+			statusOut.data = "DONE";
+				statusPub->publish(statusOut);
 		}
 		break;
 		
