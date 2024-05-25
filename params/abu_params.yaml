@@ -7,13 +7,13 @@ ABUNavigator:
 
     twist_output_topic: "/cmd_vel"
     
-    motion_A1A2_period: 50
-    motion_A1A2_velocity: 1.0
+    motion_A1A2_period: 142
+    motion_A1A2_velocity: 0.3
 
     motion_A2A3_period: 42
     motion_A2A3_velocity: 0.5
 
-    motion_A2A2_Kp: 0.0001
+    motion_A2A2_Kp: 0.0008
     
     motion_A2RED_Kp: 0.00011
     motion_A2BLU_Kp: 0.00011
