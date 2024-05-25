@@ -119,6 +119,7 @@ class abu_nav : public rclcpp::Node{
 		ABU_FSM_SEL_TEAM,// Team select decision 
 		ABU_FSM_SEL_PLAYMODE,// Play mode decision
 		ABU_FSM_A1_A2,// Blind walk from Area 1 to Area 2
+//		ABU_FSM_A1_A2_NO_Y,
 		ABU_FSM_A2_A2,// Slow down after entered Area 2, prepare to dock with the corner.
 		ABU_FSM_A2_RED,// from Red team side Area 2 corner to slope 
 		ABU_FSM_A2_BLU,// from Blue team side Area 2 corner to slope
@@ -269,7 +270,7 @@ class abu_nav : public rclcpp::Node{
 			10);
 			
 		statusPub = create_publisher<std_msgs::msg::String>(
-			"/abu_nav_stat"
+			"/abu_nav_stat",
 			10);
 			
 		runner_ = this->create_wall_timer(
@@ -424,6 +425,7 @@ class abu_nav : public rclcpp::Node{
 		
 		case ABU_FSM_A1_A2:// Leave Area 1 and enter Area 2
 		{
+			ToF_getDistance(TOF_FRONT);
 			Blind_walk_ticks++;
 			// TODO : velocity smoothing
 			if(Blind_walk_ticks > blindwalk_period){// Blind walk done
@@ -435,7 +437,13 @@ class abu_nav : public rclcpp::Node{
 			}else{
 				twist.linear.x = -blindwalk_velocity;
 				// A little bit of y component to make sure that the robot sticks to the wall
-				//twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
+				if((Blind_walk_ticks * blindwalk_velocity * 100) < 2100){
+					RCLCPP_INFO(this->get_logger(), "Command Y");
+					twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
+				}else{
+					RCLCPP_INFO(this->get_logger(), "Command Y stop");
+					twist.linear.y = 0;
+				}
 			}
 			twistout->publish(twist);
 		}
@@ -453,7 +461,7 @@ class abu_nav : public rclcpp::Node{
 			
 			calc_vel = Front_distance * Kp_A2A2;// Calculate the velocity with the Kp
 			
-			if(Front_distance < 50){// 50mm (5cm) brake distance
+			if(Front_distance < 35){// 35mm (3.5cm) brake distance
 				switch(team){
 					case TEAM_RED:
 						abu_fsm = ABU_FSM_A2_RED;
@@ -470,7 +478,7 @@ class abu_nav : public rclcpp::Node{
 			}else{
 				twist.linear.x = -calc_vel;
 				// A little bit of y component to make sure that the robot sticks to the wall
-				twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
+				//twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
 			}
 			twistout->publish(twist);
 		}
