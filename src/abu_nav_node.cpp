@@ -119,7 +119,6 @@ class abu_nav : public rclcpp::Node{
 		ABU_FSM_SEL_TEAM,// Team select decision 
 		ABU_FSM_SEL_PLAYMODE,// Play mode decision
 		ABU_FSM_A1_A2,// Blind walk from Area 1 to Area 2
-//		ABU_FSM_A1_A2_NO_Y,
 		ABU_FSM_A2_A2,// Slow down after entered Area 2, prepare to dock with the corner.
 		ABU_FSM_A2_RED,// from Red team side Area 2 corner to slope 
 		ABU_FSM_A2_BLU,// from Blue team side Area 2 corner to slope
@@ -406,7 +405,7 @@ class abu_nav : public rclcpp::Node{
 				);
 			
 			if(play_mode == PLAY_RETRY){// Retry play mode don't do A1_A2 sequence
-				switch(team){
+/*				switch(team){
 				case TEAM_RED:
 					abu_fsm = ABU_FSM_A2_RED;
 					break;
@@ -417,9 +416,14 @@ class abu_nav : public rclcpp::Node{
 					abu_fsm = ABU_FSM_IDLE;
 					break;
 				}
+*/				
+				abu_fsm = ABU_FSM_A2_A2;
 			}else{
 				abu_fsm = ABU_FSM_A1_A2;
 			}
+
+			if(play_mode == PLAY_STOP)
+				abu_fsm = ABU_FSM_STOP;
 		}
 		break;
 		
@@ -461,7 +465,7 @@ class abu_nav : public rclcpp::Node{
 			
 			calc_vel = Front_distance * Kp_A2A2;// Calculate the velocity with the Kp
 			
-			if(Front_distance < 35){// 35mm (3.5cm) brake distance
+			if(Front_distance < 20){// 20mm (2.0cm) brake distance
 				switch(team){
 					case TEAM_RED:
 						abu_fsm = ABU_FSM_A2_RED;
