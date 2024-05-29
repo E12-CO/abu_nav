@@ -48,8 +48,8 @@
 // Nav message
 #include <nav_msgs/msg/odometry.hpp>
 // std message
-#include <std_msgs/msg/string.hpp>
-#include <std_msgs/msg/uint16.hpp>
+#include "std_msgs/msg/string.hpp"
+#include "std_msgs/msg/u_int16.hpp"
 
 // tf2 lib
 #include <tf2/transform_datatypes.h>
@@ -79,7 +79,7 @@ class abu_nav : public rclcpp::Node{
 	geometry_msgs::msg::Twist twist;
 	
 	// For robot odometry (rotation check)
-	rclcpp::Subscription<nav_msgs::msg::Odometry> subOdometry;
+	rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subOdometry;
 	
 	// For status flag
 	rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPub;
@@ -786,9 +786,16 @@ class abu_nav : public rclcpp::Node{
 	}
 	
 	void ToF_publishDistance(){
-		front_tof_pub->publish(Front_distance);
-		left_tof_pub->publish(Left_distance);
-		right_tof_pub->publish(Right_distance);
+		std_msgs::msg::UInt16 tof_data;
+
+		tof_data.data = Front_distance;
+		front_tof_pub->publish(tof_data);
+
+		tof_data.data = Left_distance;
+		left_tof_pub->publish(tof_data);
+
+		tof_data.data = Right_distance;
+		right_tof_pub->publish(tof_data);
 	}
 	
 };

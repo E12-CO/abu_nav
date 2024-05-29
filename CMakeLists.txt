@@ -9,14 +9,21 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -Wextra -Wpedantic -g")
 # Dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 set(ABU_NAV_DEPS
 	rclcpp
-#	rclcpp_components
+	rclcpp_components
 	geometry_msgs
+	nav_msgs
 	std_msgs
+	tf2
+	tf2_ros
 )
 
 add_library(vl53lib
