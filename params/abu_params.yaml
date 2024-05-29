@@ -13,7 +13,14 @@ ABUNavigator:
     motion_A2A3_period: 42
     motion_A2A3_velocity: 0.5
 
-    motion_A2A2_Kp: 0.0008
+    motion_A2A2_max_velocity: 0.7
+    motion_A2A2_min_velocity: 0.3
+    motion_A2A2_Kp: 0.0004
     
-    motion_A2RED_Kp: 0.00011
-    motion_A2BLU_Kp: 0.00011
+    motion_A2RED_max_velocity: 0.7
+    motion_A2RED_min_velocity: 0.2
+    motion_A2RED_Kp: 0.0004
+    
+    motion_A2BLU_max_velocity: 0.7
+    motion_A2BLU_min_velocity: 0.2
+    motion_A2BLU_Kp: 0.0004
