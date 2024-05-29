@@ -49,6 +49,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 // std message
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/uint16.hpp>
 
 // tf2 lib
 #include <tf2/transform_datatypes.h>
@@ -84,8 +85,15 @@ class abu_nav : public rclcpp::Node{
 	rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPub;
 	std_msgs::msg::String statusOut;
 	
+	// For team mode 
 	rclcpp::Subscription<std_msgs::msg::String>::SharedPtr TeamMode;
 
+	// For ToF measurement publishing
+	rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr front_tof_pub;
+	rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr left_tof_pub;
+	rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr right_tof_pub;
+	
+	// Wall timer instant
 	rclcpp::TimerBase::SharedPtr runner_;
 	
 	// VL53L1X stuffs
@@ -315,6 +323,16 @@ class abu_nav : public rclcpp::Node{
 			
 		statusPub = create_publisher<std_msgs::msg::String>(
 			"/abu_nav_stat",
+			10);
+			
+		front_tof_pub = create_publisher<std_msgs::msg::UInt16>(
+			"/front_tof",
+			10);
+		left_tof_pub = create_publisher<std_msgs::msg::UInt16>(
+			"/left_tof",
+			10);
+		right_tof_pub = create_publisher<std_msgs::msg::UInt16>(
+			"/right_tof",
 			10);
 			
 		runner_ = this->create_wall_timer(
@@ -665,6 +683,8 @@ class abu_nav : public rclcpp::Node{
 		break;
 		}
 		
+		// Publish ToF data
+		ToF_publishDistance();
 	}
 	
 	int8_t initGPIOs(int f_tof_gpio, int l_tof_gpio, int r_tof_gpio){
@@ -763,6 +783,12 @@ class abu_nav : public rclcpp::Node{
 		Front_distance = ToF_getDistance(TOF_FRONT);
 		Left_distance = ToF_getDistance(TOF_LEFT);
 		Right_distance = ToF_getDistance(TOF_RIGHT);
+	}
+	
+	void ToF_publishDistance(){
+		front_tof_pub->publish(Front_distance);
+		left_tof_pub->publish(Left_distance);
+		right_tof_pub->publish(Right_distance);
 	}
 	
 };
