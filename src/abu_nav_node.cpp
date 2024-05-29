@@ -43,10 +43,18 @@
 
 // ROS2 
 #include <rclcpp/rclcpp.hpp>
-// Geometry lib
+// Geometry mssage
 #include <geometry_msgs/msg/twist.hpp>
+// Nav message
+#include <nav_msgs/msg/odometry.hpp>
 // std message
 #include <std_msgs/msg/string.hpp>
+
+// tf2 lib
+#include <tf2/transform_datatypes.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Transform.h>
+#include <tf2/LinearMath/Vector3.h>
 
 // Define Feedback Loop time 
 #define LOOP_TIME_MIL   100 // 100 millisec
@@ -69,6 +77,9 @@ class abu_nav : public rclcpp::Node{
 	rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twistout;
 	geometry_msgs::msg::Twist twist;
 	
+	// For robot odometry (rotation check)
+	rclcpp::Subscription<nav_msgs::msg::Odometry> subOdometry;
+	
 	// For status flag
 	rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPub;
 	std_msgs::msg::String statusOut;
@@ -79,14 +90,12 @@ class abu_nav : public rclcpp::Node{
 	
 	// VL53L1X stuffs
 	int bus_id;// I2C Bus number
-	
-	
-	
+	// XSHUT GPIOs
 	int front_tof_en_gpio, // XSHUT pin of front senser
 		left_tof_en_gpio,  // XSHUT pin of left sensor
 		right_tof_en_gpio; // XSHUT pin of right sensor
 	 
-	int current_tof; 	   // Keep track of currently in-use ToF
+	//int current_tof; 	   // Keep track of currently in-use ToF
 	
 	std::string twistout_topic;// ROS2 arg to select the twist topic name.
 	
@@ -137,8 +146,19 @@ class abu_nav : public rclcpp::Node{
 	unsigned long blindwalk_period;// How long the Robot move to get from A1 to A2
 	float blindwalk_velocity;// Velocity that the Robot use
 	
+	// From Area 2 to Area 2 corner
+	float maxvel_A2A2;// Maximum walking speed for appracing Area 2 corner
+	float minvel_A2A2;// Mininum walking speed before braking.
 	float Kp_A2A2;// Proportional gain (Kp) for approaching Area 2 corner and brake
+	
+	// From RED Area 2 leaving corner
+	float maxvel_A2RED;// Maximum walking speed for leaving RED Area 2 coner.
+	float minvel_A2RED;// Mininum walking speed before braking.
 	float Kp_A2RED;// Proportional gain (Kp) for leaving RED Area 2 corner
+	
+	// From BLUE Area 2 leaving corner
+	float maxvel_A2BLU;// Maximum walking speed for leaving BLUE Area 2 coner.
+	float minvel_A2BLU;// Mininum walking speed before braking.
 	float Kp_A2BLU;// Proportional gain (Kp) for leaving BLUE Area 2 corner
 	
 	// From Area 2 -> Slope to Area 3
@@ -146,6 +166,9 @@ class abu_nav : public rclcpp::Node{
 	float blindwalk_velocity_2;// Velocity that the Robot use
 	
 	unsigned long Blind_walk_ticks;// Keep track of time that robot is moving.
+	
+	double current_az;// current angular z pose from odometry message
+	double before_rotate_az;
 	
 	// Laser measurement storage
 	uint16_t Front_distance;
@@ -173,23 +196,36 @@ class abu_nav : public rclcpp::Node{
 		get_parameter("twist_output_topic", twistout_topic);
 		
 		// Motion related params
-		// From Area 1 to Area 2
-		declare_parameter("motion_A1A2_period", 70);// In the multiple of 100ms
+		// From Area 1 to Area 2, distance of 4.8 meters
+		declare_parameter("motion_A1A2_period", 96);// In the multiple of 100ms
 		get_parameter("motion_A1A2_period", blindwalk_period);
 		declare_parameter("motion_A1A2_velocity", 0.5);
 		get_parameter("motion_A1A2_velocity", blindwalk_velocity);
 		
-		// From Area 2 to Area 3
-		declare_parameter("motion_A2A3_period", 42);// In the multiple of 100ms
+		// From Area 2 to Area 3, distance of  3.0 meters
+		declare_parameter("motion_A2A3_period", 60);// In the multiple of 100ms
 		get_parameter("motion_A2A3_period", blindwalk_period_2);
 		declare_parameter("motion_A2A3_velocity", 0.5);
 		get_parameter("motion_A2A3_velocity", blindwalk_velocity_2);
 		
-		declare_parameter("motion_A2A2_Kp", 0.0001);
+		declare_parameter("motion_A2A2_max_velocity", 0.7);
+		get_parameter("motion_A2A2_max_velocity", maxvel_A2A2);
+		declare_parameter("motion_A2A2_min_velocity", 0.2);
+		get_parameter("motion_A2A2_min_velocity", minvel_A2A2);
+		declare_parameter("motion_A2A2_Kp", 0.0004);
 		get_parameter("motion_A2A2_Kp", Kp_A2A2);
 		
+		declare_parameter("motion_A2RED_max_velocity", 0.7);
+		get_parameter("motion_A2RED_max_velocity", maxvel_A2RED);
+		declare_parameter("motion_A2RED_min_velocity", 0.2);
+		get_parameter("motion_A2RED_min_velocity", minvel_A2RED);
 		declare_parameter("motion_A2RED_Kp", 0.00011);
 		get_parameter("motion_A2RED_Kp", Kp_A2RED);
+		
+		declare_parameter("motion_A2BLU_max_velocity", 0.7);
+		get_parameter("motion_A2BLU_max_velocity", maxvel_A2BLU);
+		declare_parameter("motion_A2BLU_min_velocity", 0.2);
+		get_parameter("motion_A2BLU_min_velocity", minvel_A2BLU);
 		declare_parameter("motion_A2BLU_Kp", 0.00011);
 		get_parameter("motion_A2BLU_Kp", Kp_A2BLU);
 
@@ -263,6 +299,15 @@ class abu_nav : public rclcpp::Node{
 				this,
 				std::placeholders::_1)
 			);
+			
+		subOdometry = create_subscription<nav_msgs::msg::Odometry>(
+			"/odom",
+			10,
+			std::bind(
+				&abu_nav::OdomCallback,
+				this,
+				std::placeholders::_1)
+			);
 		
 		twistout = create_publisher<geometry_msgs::msg::Twist>(
 			twistout_topic, 
@@ -286,6 +331,20 @@ class abu_nav : public rclcpp::Node{
 		got_teammode_flag = 1;
 	}
 	
+	// Get Angular position from mecanum controller
+	void OdomCallback(const nav_msgs::msg::Odometry::SharedPtr odom_msg){
+		tf2::Quaternion q(
+        odom_msg->pose.pose.orientation.x,
+        odom_msg->pose.pose.orientation.y,
+        odom_msg->pose.pose.orientation.z,
+        odom_msg->pose.pose.orientation.w);
+		
+		tf2::Matrix3x3 m(q);
+		double roll, pitch, yaw;
+		m.getRPY(roll, pitch, yaw);
+
+		current_az = yaw;
+	}
 	
 	void abu_runner(){
 		
@@ -297,51 +356,54 @@ class abu_nav : public rclcpp::Node{
 			twistout->publish(twist);
 		}
 
-		if(abu_prev_fsm != abu_fsm){
+		if(abu_prev_fsm != abu_fsm){// Do once when state was changed
 			abu_prev_fsm = abu_fsm;
 			switch(abu_prev_fsm){
 			case ABU_FSM_IDLE:
-				RCLCPP_INFO(this->get_logger(), "Idle state");
+				RCLCPP_INFO(this->get_logger(), "[FSM]Idle state");
 			break;
 
 			case ABU_FSM_SEL_TEAM:
-				RCLCPP_INFO(this->get_logger(), "Selecting team");
+				RCLCPP_INFO(this->get_logger(), "[FSM]Selecting team");
 			break;
 			
 			case ABU_FSM_SEL_PLAYMODE:
-				RCLCPP_INFO(this->get_logger(), "Select Play mode");
+				RCLCPP_INFO(this->get_logger(), "[FSM]Select Play mode");
 			break;
 
 			case ABU_FSM_A1_A2:
-				RCLCPP_INFO(this->get_logger(), "Blind walk from Area 1 to Area 2");
+				RCLCPP_INFO(this->get_logger(), "[FSM]Blind walk from Area 1 to Area 2");
 			break;
 
 			case ABU_FSM_A2_A2:
-				RCLCPP_INFO(this->get_logger(), "Brake before Area 2 corner");
+				RCLCPP_INFO(this->get_logger(), "[FSM]Approaching Area 2 corner");
 			break;
 
 			case ABU_FSM_A2_RED:
-				RCLCPP_INFO(this->get_logger(), "leaving Area 2 Team red");
+				RCLCPP_INFO(this->get_logger(), "[FSM]leaving Area 2 Team red");
 			break;
 
 			case ABU_FSM_A2_BLU:
-				RCLCPP_INFO(this->get_logger(), "leaving Area 2 Team blue");
+				RCLCPP_INFO(this->get_logger(), "[FSM]leaving Area 2 Team blue");
 			break;
 
 			case ABU_FSM_A2_A3_SLOPE:
-				RCLCPP_INFO(this->get_logger(), "From Area 2 to Area 3 slope");
+				RCLCPP_INFO(this->get_logger(), "[FSM]From Area 2 to Area 3 slope");
 			break;
 
 			case ABU_FSM_A3_A3:
-				RCLCPP_INFO(this->get_logger(), "Area 3");
+				RCLCPP_INFO(this->get_logger(), "[FSM]Area 3 rotation to Silo/Ball");
 			break;
 
 			case ABU_FSM_STOP:
-				RCLCPP_INFO(this->get_logger(), "STOP MODE");
+				RCLCPP_INFO(this->get_logger(), "[FSM]STOP MODE");
 			break;
 			}
 			
 		}
+		
+		// Get Distance before the FSM task
+		ToF_getAllDistance();
 		
 		switch(abu_fsm){
 		case ABU_FSM_IDLE:// Idle state, Wait for new message
@@ -363,13 +425,13 @@ class abu_nav : public rclcpp::Node{
 			
 			if((parse_team == "Red") || (parse_team == "red") || (parse_team == "RED")){
 				team = TEAM_RED;
-			}else if((parse_team == "Blue") || (parse_team == "blue") || (parse_team == "Blu") || (parse_team == "blu") || (parse_team == "BLUE") || (parse_team == "BLU")){
+			}else if((parse_team == "Blue") || (parse_team == "blue") || (parse_team == "Blu") || 
+					(parse_team == "blu") || (parse_team == "BLUE") || (parse_team == "BLU")){
 				team = TEAM_BLUE;
 			}else{
 				team = TEAM_STOP;
 			}
 
-			
 			RCLCPP_INFO(
 				this->get_logger(),
 				"Team %s", 
@@ -405,18 +467,6 @@ class abu_nav : public rclcpp::Node{
 				);
 			
 			if(play_mode == PLAY_RETRY){// Retry play mode don't do A1_A2 sequence
-/*				switch(team){
-				case TEAM_RED:
-					abu_fsm = ABU_FSM_A2_RED;
-					break;
-				case TEAM_BLUE:
-					abu_fsm = ABU_FSM_A2_BLU;
-					break;
-				default:
-					abu_fsm = ABU_FSM_IDLE;
-					break;
-				}
-*/				
 				abu_fsm = ABU_FSM_A2_A2;
 			}else{
 				abu_fsm = ABU_FSM_A1_A2;
@@ -429,24 +479,21 @@ class abu_nav : public rclcpp::Node{
 		
 		case ABU_FSM_A1_A2:// Leave Area 1 and enter Area 2
 		{
-			ToF_getDistance(TOF_FRONT);
 			Blind_walk_ticks++;
-			// TODO : velocity smoothing
+
 			if(Blind_walk_ticks > blindwalk_period){// Blind walk done
 				Blind_walk_ticks = 0;// Reset to 0
 				abu_fsm = ABU_FSM_A2_A2;
 				// stop robot
 				twist.linear.x = 0.0;
-				//twist.linear.y = 0.0;
+				twist.linear.y = 0.0;
 			}else{
 				twist.linear.x = -blindwalk_velocity;
 				// A little bit of y component to make sure that the robot sticks to the wall
 				if((Blind_walk_ticks * blindwalk_velocity * 100) < 2100){
-					RCLCPP_INFO(this->get_logger(), "Command Y");
 					twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
-				}else{
-					RCLCPP_INFO(this->get_logger(), "Command Y stop");
-					twist.linear.y = 0;
+				}else{// Stop commanding Y velocity before entering Slope.
+					twist.linear.y = 0.0;
 				}
 			}
 			twistout->publish(twist);
@@ -457,15 +504,20 @@ class abu_nav : public rclcpp::Node{
 		{
 			float calc_vel;
 			
-			Front_distance = ToF_getDistance(TOF_FRONT);
 			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 			// Detect front sensor
-			if(Front_distance > 3000)// If measurement is more than 3000mm (3m)
-				Front_distance = 3000;// Cap it at 3 meters
+			if(Front_distance > 1500)// If measurement is more than 1500mm (1.5m)
+				Front_distance = 1500;// Cap it at 1.5 meters
 			
 			calc_vel = Front_distance * Kp_A2A2;// Calculate the velocity with the Kp
 			
-			if(Front_distance < 20){// 20mm (2.0cm) brake distance
+			// Speed Min Max hold
+			if(calc_vel < minvel_A2A2)
+					calc_vel = minvel_A2A2;
+			if(calc_vel > maxvel_A2A2)
+				calc_vel = maxvel_A2A2;
+			
+			if(Front_distance < 10){// 10mm (1.0cm) brake distance
 				switch(team){
 					case TEAM_RED:
 						abu_fsm = ABU_FSM_A2_RED;
@@ -479,7 +531,7 @@ class abu_nav : public rclcpp::Node{
 				}
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
-			}else{
+			}else{				
 				twist.linear.x = -calc_vel;
 				// A little bit of y component to make sure that the robot sticks to the wall
 				//twist.linear.y = (team == TEAM_RED) ? -0.1 : ((team == TEAM_BLUE) ? 0.1 : 0.0);
@@ -492,20 +544,28 @@ class abu_nav : public rclcpp::Node{
 		{
 			float calc_vel;
 			
-			Left_distance = ToF_getDistance(TOF_LEFT);
 			RCLCPP_INFO(this->get_logger(), "Left Distance :%d", Left_distance);
-			// Detect Left sensor
-			if(Left_distance > 4285)// If measurement is more than 3000mm (3m)
-				Left_distance = 4285;// Cap it at 3 meters
+
+			calc_vel = (3950-Left_distance) * Kp_A2RED;// Calculate the velocity with the Kp
 			
-			calc_vel = (4285-Left_distance) * Kp_A2RED;// Calculate the velocity with the Kp
+			// Speed Min Max hold
+			if(calc_vel < minvel_A2RED)
+					calc_vel = minvel_A2RED;
+			if(calc_vel > maxvel_A2RED)
+				calc_vel = maxvel_A2RED;
 			
-			if(calc_vel < 0.1){// Small velocity
+			if(Left_distance > 3900){// Apporaching 3.950 m
 				abu_fsm = ABU_FSM_A2_A3_SLOPE;
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
 			}else{
 				twist.linear.y = calc_vel;// Move from Left to right
+				
+				if(Left_distance < 3000){// Stick to the wall
+					twist.linear.x = -0.1;
+				}else{// Stop commanding X velocity before entering Slope to Area 3.
+					twist.linear.x = 0.0;
+				}
 			}
 			twistout->publish(twist);
 		}
@@ -515,20 +575,28 @@ class abu_nav : public rclcpp::Node{
 		{
 			float calc_vel;
 			
-			Right_distance = ToF_getDistance(TOF_RIGHT);
 			RCLCPP_INFO(this->get_logger(), "Right Distance :%d", Right_distance);
-			// Detect Right sensor
-			if(Right_distance > 4285)// If measurement is more than 3000mm (3m)
-				Right_distance = 4285;// Cap it at 3 meters
+
+			calc_vel = (3950-Right_distance) * Kp_A2BLU;// Calculate the velocity with the Kp
 			
-			calc_vel = (4285-Right_distance) * Kp_A2BLU;// Calculate the velocity with the Kp
+			// Speed Min Max hold
+			if(calc_vel < minvel_A2BLU)
+					calc_vel = minvel_A2BLU;
+			if(calc_vel > maxvel_A2BLU)
+				calc_vel = maxvel_A2BLU;
 			
-			if(calc_vel < 0.1){// Small velocity
+			if(Right_distance > 3900){// Apporaching 3.950 m
 				abu_fsm = ABU_FSM_A2_A3_SLOPE;
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
 			}else{
 				twist.linear.y = -calc_vel;// Move from Right to Left
+				
+				if(Right_distance < 3000){// Stick to the wall
+					twist.linear.x = -0.1;
+				}else{// Stop commanding X velocity before entering Slope to Area 3.
+					twist.linear.x = 0.0;
+				}
 			}
 			twistout->publish(twist);
 			
@@ -544,6 +612,10 @@ class abu_nav : public rclcpp::Node{
 				// Stop Robot
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
+				
+				// Stamp current robot az
+				before_rotate_az = current_az;
+				
 				abu_fsm = ABU_FSM_A3_A3;
 			}else{
 				twist.linear.x = -blindwalk_velocity_2;	
@@ -552,11 +624,19 @@ class abu_nav : public rclcpp::Node{
 		}
 		break;
 		
-		case ABU_FSM_A3_A3:// Done
+		case ABU_FSM_A3_A3:// Rotate in-place 90 degree
 		{
-			abu_fsm = ABU_FSM_STOP;
-			statusOut.data = "DONE";
-				statusPub->publish(statusOut);
+			Blind_walk_ticks++;// Reuse for time out.
+			
+			// Stop robot rotation after reached 90 degree rotation OR timed out after 5 seconds
+			if((std::abs(current_az - before_rotate_az) > 1.57) || (Blind_walk_ticks > 50)){
+				Blind_walk_ticks = 0;
+				twist.angular.z = 0.0;
+				abu_fsm = ABU_FSM_STOP;
+			}else{
+				twist.angular.z = (team == TEAM_RED) ? -0.3925 : ((team == TEAM_BLUE) ? 0.3925 : 0.0);// 0.3925 rad/s
+			}
+			twistout->publish(twist);
 		}
 		break;
 		
@@ -564,7 +644,11 @@ class abu_nav : public rclcpp::Node{
 		{
 			twist.linear.x = 0.0;
 			twist.linear.y = 0.0;
+			twist.angular.z = 0.0;
 			twistout->publish(twist);
+			statusOut.data = "DONE";
+			statusPub->publish(statusOut);
+			
 			team = TEAM_STOP;
 			play_mode = PLAY_STOP;
 			abu_fsm = ABU_FSM_IDLE;
@@ -670,9 +754,15 @@ class abu_nav : public rclcpp::Node{
 			VL53L1X_ClearInterrupt(ToF);
 			first_range[ToF] = 0;
 		}
-		if(Results.Distance > 4000)
-			return 4000;
+		if(Results.Distance > 4400)
+			return 4400;
 		return Results.Distance;
+	}
+	
+	void ToF_getAllDistance(){
+		Front_distance = ToF_getDistance(TOF_FRONT);
+		Left_distance = ToF_getDistance(TOF_LEFT);
+		Right_distance = ToF_getDistance(TOF_RIGHT);
 	}
 	
 };
