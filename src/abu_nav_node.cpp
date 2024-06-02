@@ -157,23 +157,26 @@ class abu_nav : public rclcpp::Node{
 	// From Area 2 to Area 2 corner
 	float maxvel_A2A2;// Maximum walking speed for appracing Area 2 corner
 	float minvel_A2A2;// Mininum walking speed before braking.
-	float Kp_A2A2;// Proportional gain (Kp) for approaching Area 2 corner and brake
-	
+	float Kp_A2A2;// Proportional gain (Kp) for approaching Area 2 corner and brake	
+
 	// From RED Area 2 leaving corner
-	float maxvel_A2RED;// Maximum walking speed for leaving RED Area 2 coner.
-	float minvel_A2RED;// Mininum walking speed before braking.
-	float Kp_A2RED;// Proportional gain (Kp) for leaving RED Area 2 corner
+	float normalvel_A2RED;// normal runnign speed 
+	float slowvel_A2RED;// slowed down speed for entering area 3
+	unsigned long Kt_A2RED;// braking time after front sensor detects openning
 	
 	// From BLUE Area 2 leaving corner
-	float maxvel_A2BLU;// Maximum walking speed for leaving BLUE Area 2 coner.
-	float minvel_A2BLU;// Mininum walking speed before braking.
-	float Kp_A2BLU;// Proportional gain (Kp) for leaving BLUE Area 2 corner
+	float normalvel_A2BLU;// normal runnign speed 
+	float slowvel_A2BLU;// slowed down speed for entering area 3
+	unsigned long Kt_A2BLU;// braking time after front sensor detects openning
 	
 	// From Area 2 -> Slope to Area 3
 	unsigned long blindwalk_period_2;// How long the Robot move to get from A2 to A3 over the slope
 	float blindwalk_velocity_2;// Velocity that the Robot use
 	
 	unsigned long Blind_walk_ticks;// Keep track of time that robot is moving.
+
+	float x_dist, y_dist;
+	float x_dist_prev, y_dist_prev;
 	
 	double current_az;// current angular z pose from odometry message
 	double before_rotate_az;
@@ -185,6 +188,8 @@ class abu_nav : public rclcpp::Node{
 	
 	uint8_t first_range[3] = {1};
 	VL53L1X_Result_t Results;
+
+        unsigned long A2Delay;
 	
 	abu_nav() : Node("ABUNavigator"){
 		RCLCPP_INFO(this->get_logger(), "Starting ABU Navigation node");
@@ -223,19 +228,19 @@ class abu_nav : public rclcpp::Node{
 		declare_parameter("motion_A2A2_Kp", 0.0004);
 		get_parameter("motion_A2A2_Kp", Kp_A2A2);
 		
-		declare_parameter("motion_A2RED_max_velocity", 0.7);
-		get_parameter("motion_A2RED_max_velocity", maxvel_A2RED);
-		declare_parameter("motion_A2RED_min_velocity", 0.2);
-		get_parameter("motion_A2RED_min_velocity", minvel_A2RED);
-		declare_parameter("motion_A2RED_Kp", 0.00011);
-		get_parameter("motion_A2RED_Kp", Kp_A2RED);
+		declare_parameter("motion_A2RED_normal_velocity", 0.3);
+		get_parameter("motion_A2RED_normal_velocity", normalvel_A2RED);
+		declare_parameter("motion_A2RED_slow_velocity", 0.3);
+		get_parameter("motion_A2RED_slow_velocity", slowvel_A2RED);
+		declare_parameter("motion_A2RED_Kt", 20);
+		get_parameter("motion_A2RED_Kt", Kt_A2RED);
 		
-		declare_parameter("motion_A2BLU_max_velocity", 0.7);
-		get_parameter("motion_A2BLU_max_velocity", maxvel_A2BLU);
-		declare_parameter("motion_A2BLU_min_velocity", 0.2);
-		get_parameter("motion_A2BLU_min_velocity", minvel_A2BLU);
-		declare_parameter("motion_A2BLU_Kp", 0.00011);
-		get_parameter("motion_A2BLU_Kp", Kp_A2BLU);
+		declare_parameter("motion_A2BLU_normal_velocity", 0.3);
+		get_parameter("motion_A2BLU_normal_velocity", normalvel_A2BLU);
+		declare_parameter("motion_A2BLU_slow_velocity", 0.3);
+		get_parameter("motion_A2BLU_slow_velocity", slowvel_A2BLU);
+		declare_parameter("motion_A2BLU_Kt", 20);
+		get_parameter("motion_A2BLU_Kt", Kt_A2BLU);
 
 		// Initialize all GPIOs
 		if(initGPIOs(front_tof_en_gpio, left_tof_en_gpio, right_tof_en_gpio) < 0){
@@ -291,8 +296,10 @@ class abu_nav : public rclcpp::Node{
 				VL53L1X_UltraLite_Linux_I2C_Init(TOF_RIGHT, bus_id, 0x2B);
 				VL53L1X_SensorInit(TOF_RIGHT);
 				VL53L1X_SetDistanceMode(TOF_RIGHT, 2); /* 1=short, 2=long */
-				VL53L1X_SetTimingBudgetInMs(TOF_RIGHT, 50);
+				VL53L1X_SetTimingBudgetInMs(TOF_RIGHT, 90);
 				VL53L1X_SetInterMeasurementInMs(TOF_RIGHT, 52);
+				VL53L1X_SetROI(TOF_RIGHT, 4, 4);
+				VL53L1X_SetROICenter(TOF_RIGHT, 193);
 				VL53L1X_StartRanging(TOF_RIGHT);
 				RCLCPP_INFO(this->get_logger(), "Right ToF configured");
 			break;
@@ -361,6 +368,8 @@ class abu_nav : public rclcpp::Node{
 		double roll, pitch, yaw;
 		m.getRPY(roll, pitch, yaw);
 
+		x_dist = odom_msg->pose.pose.position.x;
+		y_dist = odom_msg->pose.pose.position.y;
 		current_az = yaw;
 	}
 	
@@ -538,9 +547,11 @@ class abu_nav : public rclcpp::Node{
 			if(Front_distance < 10){// 10mm (1.0cm) brake distance
 				switch(team){
 					case TEAM_RED:
+						y_dist_prev = y_dist;
 						abu_fsm = ABU_FSM_A2_RED;
 						break;
 					case TEAM_BLUE:
+						y_dist_prev = y_dist;
 						abu_fsm = ABU_FSM_A2_BLU;
 						break;
 					default:
@@ -560,27 +571,21 @@ class abu_nav : public rclcpp::Node{
 		
 		case ABU_FSM_A2_RED:// Red team leaving Area 2 corner
 		{
-			float calc_vel;
-			
-			RCLCPP_INFO(this->get_logger(), "Left Distance :%d", Left_distance);
+			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 
-			calc_vel = (3950-Left_distance) * Kp_A2RED;// Calculate the velocity with the Kp
-			
-			// Speed Min Max hold
-			if(calc_vel < minvel_A2RED)
-					calc_vel = minvel_A2RED;
-			if(calc_vel > maxvel_A2RED)
-				calc_vel = maxvel_A2RED;
-			
-			if(Left_distance > 3900){// Apporaching 3.950 m
+
+			if(Front_distance > 150)
+				A2Delay++;
+
+			if(A2Delay > Kt_A2RED){// Apporaching 3.950 m
+				A2Delay = 0;
 				abu_fsm = ABU_FSM_A2_A3_SLOPE;
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
 			}else{
-				twist.linear.y = calc_vel;// Move from Left to right
-				
-				if(Left_distance < 3000){// Stick to the wall
-					twist.linear.x = -0.1;
+				twist.linear.y = (Front_distance < 150) ? normalvel_A2RED : slowvel_A2RED;// Move from Right to Left
+				if(abs(abs(y_dist) - abs(y_dist_prev)) < 2.5){// Stick to the wall
+					twist.linear.x = -0.05;
 				}else{// Stop commanding X velocity before entering Slope to Area 3.
 					twist.linear.x = 0.0;
 				}
@@ -591,27 +596,20 @@ class abu_nav : public rclcpp::Node{
 		
 		case ABU_FSM_A2_BLU:// Blue team leaving Area 2 corner 
 		{
-			float calc_vel;
+			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 			
-			RCLCPP_INFO(this->get_logger(), "Right Distance :%d", Right_distance);
+			if(Front_distance > 150)
+				A2Delay++;
 
-			calc_vel = (3950-Right_distance) * Kp_A2BLU;// Calculate the velocity with the Kp
-			
-			// Speed Min Max hold
-			if(calc_vel < minvel_A2BLU)
-					calc_vel = minvel_A2BLU;
-			if(calc_vel > maxvel_A2BLU)
-				calc_vel = maxvel_A2BLU;
-			
-			if(Right_distance > 3900){// Apporaching 3.950 m
+			if(A2Delay > Kt_A2BLU){
+				A2Delay = 0;
 				abu_fsm = ABU_FSM_A2_A3_SLOPE;
 				twist.linear.x = 0.0;
 				twist.linear.y = 0.0;
 			}else{
-				twist.linear.y = -calc_vel;// Move from Right to Left
-				
-				if(Right_distance < 3000){// Stick to the wall
-					twist.linear.x = -0.1;
+				twist.linear.y = (Front_distance < 150) ? (-normalvel_A2BLU) : (-slowvel_A2BLU);// Move from Right to Left
+				if(abs(abs(y_dist) - abs(y_dist_prev)) < 2.5){				
+					twist.linear.x = -0.05;
 				}else{// Stop commanding X velocity before entering Slope to Area 3.
 					twist.linear.x = 0.0;
 				}
@@ -774,8 +772,8 @@ class abu_nav : public rclcpp::Node{
 			VL53L1X_ClearInterrupt(ToF);
 			first_range[ToF] = 0;
 		}
-		if(Results.Distance > 4400)
-			return 4400;
+		//if(Results.Distance > 4400)
+		//	return 4400;
 		return Results.Distance;
 	}
 	
