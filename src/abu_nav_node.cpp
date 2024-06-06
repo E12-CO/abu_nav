@@ -140,7 +140,7 @@ class abu_nav : public rclcpp::Node{
 		ABU_FSM_A2_RED,// from Red team side Area 2 corner to slope 
 		ABU_FSM_A2_BLU,// from Blue team side Area 2 corner to slope
 		ABU_FSM_A2_A3_SLOPE,// Enter the slope from Area 2 to Area 3
-		ABU_FSM_A3_A3,// For other stuffs on area 3
+		ABU_FSM_A3_A3,// Area 3 rotate-to-ball
 		ABU_FSM_STOP = 255
 	};
 	
@@ -253,59 +253,9 @@ class abu_nav : public rclcpp::Node{
 		// 0 - TOF_FRONT -> Front sensor
 		// 1 - TOF_LEFT -> Left sensor
 		// 2 - TOF_RIGHT -> Right senser
-		for(uint8_t i=2; i != 255; i--){
-			switch(i){
-			case TOF_FRONT:
-				ToF_select(TOF_FRONT);
-				usleep(20000);// 20ms delay for sensor startup
-				if(VL53L1X_SensorInit(TOF_FRONT) < 0){
-					RCLCPP_ERROR(this->get_logger(), "TOF_FRONT Init Error");
-					exit(1);
-				}
-				VL53L1X_SetDistanceMode(TOF_FRONT, 2); /* 1=short, 2=long */
-				VL53L1X_SetTimingBudgetInMs(TOF_FRONT, 50);
-				VL53L1X_SetInterMeasurementInMs(TOF_FRONT, 52);
-				VL53L1X_StartRanging(TOF_FRONT);
-				RCLCPP_INFO(this->get_logger(), "Front ToF configured");
-			break;
-			
-			case TOF_LEFT:
-				ToF_select(TOF_LEFT);
-				usleep(20000);// 20ms delay for sensor startup
-				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2A << 1)) < 0){
-					RCLCPP_ERROR(this->get_logger(), "Set TOF_LEFT I2C address Error");
-					exit(1);
-				}
-				VL53L1X_UltraLite_Linux_I2C_Init(TOF_LEFT, bus_id, 0x2A);
-				VL53L1X_SensorInit(TOF_LEFT);
-				VL53L1X_SetDistanceMode(TOF_LEFT, 2); /* 1=short, 2=long */
-				VL53L1X_SetTimingBudgetInMs(TOF_LEFT, 50);
-				VL53L1X_SetInterMeasurementInMs(TOF_LEFT, 52);
-				VL53L1X_StartRanging(TOF_LEFT);
-				RCLCPP_INFO(this->get_logger(), "Left ToF configured");
-			break;
-			
-			case TOF_RIGHT:
-				ToF_select(TOF_RIGHT);
-				usleep(20000);// 20ms delay for sensor startup
-				VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
-				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2B << 1)) < 0){
-					RCLCPP_ERROR(this->get_logger(), "Set TOF_RIGHT I2C address Error");
-					exit(1);
-				}
-				VL53L1X_UltraLite_Linux_I2C_Init(TOF_RIGHT, bus_id, 0x2B);
-				VL53L1X_SensorInit(TOF_RIGHT);
-				VL53L1X_SetDistanceMode(TOF_RIGHT, 2); /* 1=short, 2=long */
-				VL53L1X_SetTimingBudgetInMs(TOF_RIGHT, 90);
-				VL53L1X_SetInterMeasurementInMs(TOF_RIGHT, 52);
-				VL53L1X_SetROI(TOF_RIGHT, 4, 4);
-				VL53L1X_SetROICenter(TOF_RIGHT, 193);
-				VL53L1X_StartRanging(TOF_RIGHT);
-				RCLCPP_INFO(this->get_logger(), "Right ToF configured");
-			break;
-			}
-		}
-		
+
+		ToF_init();
+
 		TeamMode = create_subscription<std_msgs::msg::String>(
 			"/teammode",
 			10,
@@ -376,6 +326,7 @@ class abu_nav : public rclcpp::Node{
 	void abu_runner(){
 		
 		// For emergency
+
 		if(got_teammode_flag == 1){
 			abu_fsm = ABU_FSM_IDLE;
 			twist.linear.x = 0.0;
@@ -533,8 +484,8 @@ class abu_nav : public rclcpp::Node{
 			
 			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 			// Detect front sensor
-			if(Front_distance > 1500)// If measurement is more than 1500mm (1.5m)
-				Front_distance = 1500;// Cap it at 1.5 meters
+			if(Left_distance > 1500)// If measurement is more than 1500mm (1.5m)
+				Left_distance = 1500;// Cap it at 1.5 meters
 			
 			calc_vel = Front_distance * Kp_A2A2;// Calculate the velocity with the Kp
 			
@@ -544,7 +495,7 @@ class abu_nav : public rclcpp::Node{
 			if(calc_vel > maxvel_A2A2)
 				calc_vel = maxvel_A2A2;
 			
-			if(Front_distance < 10){// 10mm (1.0cm) brake distance
+			if(Left_distance < 10){// 10mm (1.0cm) brake distance
 				switch(team){
 					case TEAM_RED:
 						y_dist_prev = y_dist;
@@ -574,7 +525,7 @@ class abu_nav : public rclcpp::Node{
 			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 
 
-			if(Front_distance > 150)
+			if(Left_distance > 150)
 				A2Delay++;
 
 			if(A2Delay > Kt_A2RED){// Apporaching 3.950 m
@@ -598,7 +549,7 @@ class abu_nav : public rclcpp::Node{
 		{
 			RCLCPP_INFO(this->get_logger(), "Front Distance :%d", Front_distance);
 			
-			if(Front_distance > 150)
+			if(Right_distance > 150)
 				A2Delay++;
 
 			if(A2Delay > Kt_A2BLU){
@@ -761,24 +712,82 @@ class abu_nav : public rclcpp::Node{
 			return;
 		}
 	}
+
+	void ToF_init(){
+		for(uint8_t i=2; i != 255; i--){
+			switch(i){
+			case TOF_FRONT:
+				break;
+				ToF_select(TOF_FRONT);
+				usleep(20000);// 20ms delay for sensor startup
+				VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
+				if(VL53L1X_SensorInit(TOF_FRONT) < 0){
+					RCLCPP_ERROR(this->get_logger(), "TOF_FRONT Init Error");
+					exit(1);
+				}
+				VL53L1X_SetDistanceMode(TOF_FRONT, 2); /* 1=short, 2=long */
+				VL53L1X_SetTimingBudgetInMs(TOF_FRONT, 90);
+				VL53L1X_SetInterMeasurementInMs(TOF_FRONT, 52);
+				VL53L1X_StartRanging(TOF_FRONT);
+				RCLCPP_INFO(this->get_logger(), "Front ToF configured");
+			break;
+			
+			case TOF_LEFT:
+//				break;
+				ToF_select(TOF_LEFT);
+				usleep(20000);// 20ms delay for sensor startup
+				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2A << 1)) < 0){
+					RCLCPP_ERROR(this->get_logger(), "Set TOF_LEFT I2C address Error");
+					exit(1);
+				}
+				VL53L1X_UltraLite_Linux_I2C_Init(TOF_LEFT, bus_id, 0x2A);
+				VL53L1X_SensorInit(TOF_LEFT);
+				VL53L1X_SetDistanceMode(TOF_LEFT, 2); /* 1=short, 2=long */
+				VL53L1X_SetTimingBudgetInMs(TOF_LEFT, 90);
+				VL53L1X_SetInterMeasurementInMs(TOF_LEFT, 52);
+				VL53L1X_StartRanging(TOF_LEFT);
+				RCLCPP_INFO(this->get_logger(), "Left ToF configured");
+			break;
+			
+			case TOF_RIGHT:
+//				break;
+				ToF_select(TOF_RIGHT);
+				usleep(20000);// 20ms delay for sensor startup
+				VL53L1X_UltraLite_Linux_I2C_Init(TOF_FRONT, bus_id, 0x29);
+				if(VL53L1X_SetI2CAddress(TOF_FRONT, (0x2B << 1)) < 0){
+					RCLCPP_ERROR(this->get_logger(), "Set TOF_RIGHT I2C address Error");
+					exit(1);
+				}
+				VL53L1X_UltraLite_Linux_I2C_Init(TOF_RIGHT, bus_id, 0x2B);
+				VL53L1X_SensorInit(TOF_RIGHT);
+				VL53L1X_SetDistanceMode(TOF_RIGHT, 2); /* 1=short, 2=long */
+				VL53L1X_SetTimingBudgetInMs(TOF_RIGHT, 90);
+				VL53L1X_SetInterMeasurementInMs(TOF_RIGHT, 52);
+				VL53L1X_StartRanging(TOF_RIGHT);
+				RCLCPP_INFO(this->get_logger(), "Right ToF configured");
+			break;
+			}
+		}
+		
+	}
 	
 	uint16_t ToF_getDistance(uint8_t ToF){
 		VL53L1X_GetResult(ToF, &Results);
 		VL53L1X_ClearInterrupt(ToF);
-		if (first_range[ToF]) {
+//		if (first_range[ToF]) {
 			/* very first measurement shall be ignored
 			 * thus requires twice call
 			 */
 			VL53L1X_ClearInterrupt(ToF);
 			first_range[ToF] = 0;
-		}
+//		}
 		//if(Results.Distance > 4400)
 		//	return 4400;
 		return Results.Distance;
 	}
 	
 	void ToF_getAllDistance(){
-		Front_distance = ToF_getDistance(TOF_FRONT);
+//		Front_distance = ToF_getDistance(TOF_FRONT);
 		Left_distance = ToF_getDistance(TOF_LEFT);
 		Right_distance = ToF_getDistance(TOF_RIGHT);
 	}
